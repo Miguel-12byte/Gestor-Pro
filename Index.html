@@ -1,0 +1,226 @@
+<!doctype html>
+
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestor PRO Firebase</title><script src="https://cdn.jsdelivr.net/npm/chart.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script><script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script><style>
+body{margin:0;font-family:system-ui;background:#0f172a;color:#fff}
+header{padding:15px;background:#2563eb;text-align:center;font-weight:bold}
+.container{padding:15px;max-width:900px;margin:auto}
+input,select,button{width:100%;padding:10px;margin:5px 0;border:none;border-radius:8px}
+input,select{background:#111827;color:#fff}
+button{background:#2563eb;color:#fff;cursor:pointer}
+.card{background:#111827;padding:10px;border-radius:8px;margin-top:10px}
+.flex{display:flex;justify-content:space-between;gap:10px}
+.small{font-size:12px;opacity:.7}
+canvas{background:#fff;border-radius:10px;margin-top:20px}
+</style></head><body>
+<header>📦 Gestor PRO Firebase</header>
+<div class="container"><h3>Login / Cadastro</h3>
+<input id="email" placeholder="Email">
+<input id="password" type="password" placeholder="Senha">
+<button onclick="login()">Entrar</button>
+<button onclick="register()">Criar Conta</button><h3>Produto</h3>
+<input id="name" placeholder="Nome">
+<input id="price" type="number" placeholder="Preço">
+<input id="qty" type="number" placeholder="Quantidade"><select id="category"></select> <input id="newCategory" placeholder="Nova categoria"> <button onclick="addCategory()">+ Categoria</button>
+
+<button onclick="saveProduct()">Salvar</button>
+
+<input id="search" placeholder="Buscar">
+<div id="list"></div><h3>Gráfico</h3>
+<canvas id="chart"></canvas></div><script>
+
+// 🔥 CONFIG FIREBASE
+const firebaseConfig = {
+  apiKey: "SUA_KEY",
+  authDomain: "SEU_DOMINIO",
+  projectId: "SEU_ID"
+}
+
+firebase.initializeApp(firebaseConfig)
+const auth = firebase.auth()
+const db = firebase.firestore()
+
+let user = null
+let products = []
+let categories = ['Geral']
+let editIndex = null
+
+// 🔐 LOGIN
+function login(){
+  const emailVal = document.getElementById('email').value
+  const passVal = document.getElementById('password').value
+
+  auth.signInWithEmailAndPassword(emailVal, passVal)
+    .catch(err=>alert(err.message))
+}
+
+// 🆕 CADASTRO
+function register(){
+  const emailVal = document.getElementById('email').value
+  const passVal = document.getElementById('password').value
+
+  auth.createUserWithEmailAndPassword(emailVal, passVal)
+    .catch(err=>alert(err.message))
+}
+
+// 🔄 OBSERVADOR
+
+auth.onAuthStateChanged(u=>{
+  if(u){
+    user = u
+    load()
+  }
+})
+
+// 📥 CARREGAR
+async function load(){
+  const snap = await db.collection('users').doc(user.uid).get()
+  const data = snap.data() || {}
+
+  products = data.products || []
+  categories = data.categories || ['Geral']
+
+  renderCategories()
+  render()
+}
+
+// 💾 SALVAR
+async function saveDB(){
+  await db.collection('users').doc(user.uid).set({
+    products,
+    categories
+  })
+}
+
+// 📂 CATEGORIAS
+function renderCategories(){
+  const select = document.getElementById('category')
+  select.innerHTML = ''
+
+  categories.forEach(c=>{
+    const o = document.createElement('option')
+    o.value = c
+    o.textContent = c
+    select.appendChild(o)
+  })
+}
+
+function addCategory(){
+  const input = document.getElementById('newCategory')
+  const val = input.value.trim()
+
+  if(!val) return
+
+  categories.push(val)
+  input.value = ''
+
+  renderCategories()
+  saveDB()
+}
+
+// 📦 PRODUTO
+function saveProduct(){
+  const p = {
+    name: document.getElementById('name').value,
+    price: Number(document.getElementById('price').value),
+    qty: Number(document.getElementById('qty').value),
+    category: document.getElementById('category').value
+  }
+
+  if(editIndex !== null){
+    products[editIndex] = p
+    editIndex = null
+  } else {
+    products.push(p)
+  }
+
+  clearInputs()
+  saveDB()
+  render()
+}
+
+function clearInputs(){
+  document.getElementById('name').value = ''
+  document.getElementById('price').value = ''
+  document.getElementById('qty').value = ''
+}
+
+function editItem(i){
+  const p = products[i]
+
+  document.getElementById('name').value = p.name
+  document.getElementById('price').value = p.price
+  document.getElementById('qty').value = p.qty
+  document.getElementById('category').value = p.category
+
+  editIndex = i
+}
+
+function removeItem(i){
+  if(confirm('Excluir produto?')){
+    products.splice(i,1)
+    saveDB()
+    render()
+  }
+}
+
+// 🎨 RENDER
+function render(){
+  const list = document.getElementById('list')
+  const searchVal = document.getElementById('search').value.toLowerCase()
+
+  list.innerHTML = ''
+
+  let totals = {}
+
+  products.forEach((p,i)=>{
+    if(!p.name.toLowerCase().includes(searchVal)) return
+
+    totals[p.category] = (totals[p.category]||0) + p.price*p.qty
+
+    const div = document.createElement('div')
+    div.className = 'card'
+
+    div.innerHTML = `
+      <b>${p.name}</b><br>
+      <span class='small'>${p.category}</span><br>
+      R$ ${p.price.toFixed(2)} | Qtd: ${p.qty}
+      <div class='flex'>
+        <button onclick="editItem(${i})">Editar</button>
+        <button onclick="removeItem(${i})">X</button>
+      </div>
+    `
+
+    list.appendChild(div)
+  })
+
+  renderChart(totals)
+}
+
+// 📊 GRÁFICO
+let chart
+function renderChart(data){
+  const ctx = document.getElementById('chart')
+
+  if(chart) chart.destroy()
+
+  chart = new Chart(ctx,{
+    type:'bar',
+    data:{
+      labels:Object.keys(data),
+      datasets:[{
+        label:'Valor em estoque',
+        data:Object.values(data)
+      }]
+    }
+  })
+}
+
+// 🔍 BUSCA
+document.getElementById('search').oninput = render
+
+</script></body>
+</html>
